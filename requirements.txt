@@ -1,0 +1,17 @@
+# RAG
+llama-index-core>=0.14,<0.15
+llama-index-llms-ollama
+llama-index-embeddings-ollama
+llama-index-vector-stores-chroma
+llama-index-readers-file
+chromadb>=1.0
+# Voice
+faster-whisper>=1.2
+av<16  # newer PyAV breaks faster-whisper 1.2 audio decoding
+piper-tts>=1.3
+sounddevice
+numpy
+# API
+fastapi
+uvicorn
+python-multipart

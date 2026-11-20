@@ -1,0 +1,12 @@
+[
+  {"question": "How do I clear error E47?", "expect_section": "E47", "answer_keywords": ["cover", "lock"]},
+  {"question": "The feeder is jammed, what should I do?", "expect_section": "E47", "answer_keywords": ["screw"]},
+  {"question": "What does E52 mean?", "expect_section": "E52", "answer_keywords": ["torque"]},
+  {"question": "What is the target torque for the screws?", "expect_section": "Technical data", "answer_keywords": ["4.5"]},
+  {"question": "How often do I replace the screwdriver bit?", "expect_section": "Maintenance schedule", "answer_keywords": ["50,000", "50000"]},
+  {"question": "What is the part number of the feed hose?", "expect_section": "Spare parts", "answer_keywords": ["HOSE-F5-3000"]},
+  {"question": "The light curtain error keeps coming back. What can I do?", "expect_section": "E23", "answer_keywords": ["clean"]},
+  {"question": "How do I start the cell?", "expect_section": "Starting the cell", "answer_keywords": ["Reference"]},
+  {"question": "What is the minimum air pressure?", "expect_section": "", "answer_keywords": ["5.5"]},
+  {"question": "Who won the football game yesterday?", "expect_section": "", "answer_keywords": ["can't find", "cannot find", "not in the documentation"]}
+]

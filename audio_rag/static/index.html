@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio RAG – Machine Voice Assistant</title>
+<style>
+  :root { --bg:#0f1418; --panel:#182027; --line:#26313a; --text:#e7edf2; --muted:#8b9aa6; --accent:#3fb8af; --warn:#e8a33d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 20px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  select, input[type=text] { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:15px; }
+  input[type=text] { flex:1; min-width: 220px; }
+  button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-size:15px; cursor:pointer; }
+  button:hover { border-color: var(--accent); }
+  #talk { width: 100%; margin: 22px 0; padding: 26px; font-size: 18px; font-weight: 600; border-radius: 14px;
+          border: 2px solid var(--accent); background: transparent; color: var(--accent); user-select:none; touch-action: none; }
+  #talk.rec { background: var(--accent); color: #062421; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-top:14px; }
+  .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
+  #answer { white-space: pre-wrap; line-height: 1.5; font-size: 16px; }
+  .src { font-size: 13px; color: var(--muted); padding: 6px 0; border-top: 1px solid var(--line); }
+  .src:first-of-type { border-top: 0; }
+  .src b { color: var(--text); font-weight: 500; }
+  .status { color: var(--muted); font-size: 13px; min-height: 18px; margin-top: 8px; }
+  .err { color: var(--warn); }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Machine Voice Assistant</h1>
+  <p class="sub">Ask a machine about itself. Answers come only from its own documentation, using a local Llama model.</p>
+
+  <div class="row">
+    <label for="machine" style="color:var(--muted);font-size:14px">Machine</label>
+    <select id="machine"></select>
+  </div>
+
+  <button id="talk">Hold to talk</button>
+
+  <form id="textForm" class="row">
+    <input id="question" type="text" placeholder="…or type a question, e.g. How do I clear error E47?">
+    <button type="submit">Ask</button>
+  </form>
+  <div id="status" class="status"></div>
+
+  <div id="heardCard" class="card hidden"><div class="label">You asked</div><div id="heard"></div></div>
+  <div id="answerCard" class="card hidden"><div class="label">Answer</div><div id="answer"></div></div>
+  <div id="sourcesCard" class="card hidden"><div class="label">From the documentation</div><div id="sources"></div></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+let recorder = null, chunks = [], stream = null;
+
+function status(msg, isErr = false) { $("status").textContent = msg; $("status").className = "status" + (isErr ? " err" : ""); }
+
+async function loadMachines() {
+  const res = await fetch("/machines");
+  const { machines } = await res.json();
+  $("machine").innerHTML = machines.map(m => `<option>${esc(m)}</option>`).join("");
+}
+
+function show(data) {
+  $("heard").textContent = data.question;
+  $("answer").textContent = data.answer;
+  $("sources").innerHTML = data.sources.map(s =>
+    `<div class="src"><b>${esc(s.section)}</b> · ${esc(s.file)}${s.score != null ? " · score " + s.score : ""}</div>`).join("");
+  ["heardCard", "answerCard", "sourcesCard"].forEach(id => $(id).classList.remove("hidden"));
+  const t = data.timing ? `Speech-to-text ${data.timing.speech_to_text}s · answer ${data.timing.answer}s` : `Answer in ${data.seconds}s`;
+  status(t);
+  say(data.answer);
+}
+
+async function say(text) {
+  try {
+    const res = await fetch("/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    if (res.status === 200) {
+      const audio = new Audio(URL.createObjectURL(await res.blob()));
+      await audio.play();
+      return;
+    }
+  } catch (e) { /* fall back below */ }
+  if ("speechSynthesis" in window) {           // no Piper voice installed: use the browser voice
+    speechSynthesis.cancel();
+    speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  }
+}
+
+async function handle(res) {
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { msg = (await res.json()).detail || msg; } catch (e) {}
+    status(msg, true);
+    return;
+  }
+  show(await res.json());
+}
+
+$("textForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const question = $("question").value.trim();
+  if (!question) return;
+  status("Thinking…");
+  await handle(await fetch("/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ machine: $("machine").value, question }) }));
+});
+
+async function startRec() {
+  if (recorder) return;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) { status("Microphone access was blocked.", true); return; }
+  chunks = [];
+  recorder = new MediaRecorder(stream);
+  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  recorder.onstop = sendRec;
+  recorder.start();
+  $("talk").classList.add("rec"); $("talk").textContent = "Listening… release to send";
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+
+function stopRec() {
+  if (!recorder) return;
+  recorder.stop();
+  stream.getTracks().forEach(t => t.stop());
+  $("talk").classList.remove("rec"); $("talk").textContent = "Hold to talk";
+}
+
+async function sendRec() {
+  const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+  recorder = null;
+  if (blob.size < 2000) { status("Too short. Hold the button while you speak.", true); return; }
+  const ext = (blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm");
+  const form = new FormData();
+  form.append("machine", $("machine").value);
+  form.append("audio", blob, "question." + ext);
+  status("Transcribing and thinking…");
+  await handle(await fetch("/ask-audio", { method: "POST", body: form }));
+}
+
+const talk = $("talk");
+talk.addEventListener("pointerdown", (e) => { e.preventDefault(); startRec(); });
+["pointerup", "pointerleave", "pointercancel"].forEach(ev => talk.addEventListener(ev, stopRec));
+document.addEventListener("keydown", (e) => { if (e.code === "Space" && document.activeElement.tagName !== "INPUT" && !e.repeat) { e.preventDefault(); startRec(); } });
+document.addEventListener("keyup", (e) => { if (e.code === "Space" && document.activeElement.tagName !== "INPUT") stopRec(); });
+
+loadMachines();
+</script>
+</body>
+</html>
