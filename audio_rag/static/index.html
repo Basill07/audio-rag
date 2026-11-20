@@ -28,6 +28,13 @@
   .status { color: var(--muted); font-size: 13px; min-height: 18px; margin-top: 8px; }
   .err { color: var(--warn); }
   .hidden { display:none; }
+  details.docs { margin-top: 28px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding: 12px 18px; }
+  details.docs summary { cursor:pointer; font-weight:600; padding: 4px 0; }
+  .docs .row { margin-top: 12px; }
+  .pick { border-style: dashed; }
+  #picked, #docList { color: var(--muted); font-size: 13px; margin-top: 10px; white-space: pre-line; max-height: 160px; overflow:auto; }
+  .chk { color: var(--muted); font-size: 14px; display:flex; gap:6px; align-items:center; }
+  .primary { border-color: var(--accent); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -51,6 +58,23 @@
   <div id="heardCard" class="card hidden"><div class="label">You asked</div><div id="heard"></div></div>
   <div id="answerCard" class="card hidden"><div class="label">Answer</div><div id="answer"></div></div>
   <div id="sourcesCard" class="card hidden"><div class="label">From the documentation</div><div id="sources"></div></div>
+
+  <details class="docs" id="docsPanel">
+    <summary>Add documents for a machine</summary>
+    <div class="row">
+      <input id="newMachine" type="text" placeholder="Machine name, e.g. forklift_2 or station3">
+    </div>
+    <div class="row">
+      <button type="button" class="pick" onclick="$('folderInput').click()">Choose folder</button>
+      <button type="button" class="pick" onclick="$('filesInput').click()">Choose files</button>
+      <label class="chk"><input id="replaceDocs" type="checkbox"> Replace old documents</label>
+    </div>
+    <input id="folderInput" type="file" webkitdirectory directory multiple class="hidden">
+    <input id="filesInput" type="file" multiple accept=".pdf,.docx,.md,.txt" class="hidden">
+    <div id="picked">No files chosen. Supported: PDF, Word (.docx), Markdown, text.</div>
+    <div class="row"><button type="button" id="uploadBtn" class="primary">Upload and learn</button></div>
+    <div id="docList"></div>
+  </details>
 </main>
 
 <script>
@@ -60,10 +84,11 @@ let recorder = null, chunks = [], stream = null;
 
 function status(msg, isErr = false) { $("status").textContent = msg; $("status").className = "status" + (isErr ? " err" : ""); }
 
-async function loadMachines() {
+async function loadMachines(select) {
   const res = await fetch("/machines");
   const { machines } = await res.json();
   $("machine").innerHTML = machines.map(m => `<option>${esc(m)}</option>`).join("");
+  if (select) $("machine").value = select;
 }
 
 function show(data) {
@@ -150,7 +175,59 @@ talk.addEventListener("pointerdown", (e) => { e.preventDefault(); startRec(); })
 document.addEventListener("keydown", (e) => { if (e.code === "Space" && document.activeElement.tagName !== "INPUT" && !e.repeat) { e.preventDefault(); startRec(); } });
 document.addEventListener("keyup", (e) => { if (e.code === "Space" && document.activeElement.tagName !== "INPUT") stopRec(); });
 
-loadMachines();
+// ---------- Add documents ----------
+const SUPPORTED = [".pdf", ".docx", ".md", ".txt"];
+let pickedFiles = [];
+
+function setPicked(fileList, fromFolder) {
+  const all = Array.from(fileList);
+  pickedFiles = all.filter(f => SUPPORTED.some(ext => f.name.toLowerCase().endsWith(ext)) || f.name === "whisper_hints.txt");
+  const ignored = all.length - pickedFiles.length;
+  if (fromFolder && all.length && !$("newMachine").value) {
+    $("newMachine").value = (all[0].webkitRelativePath || "").split("/")[0];   // folder name = machine name
+  }
+  $("picked").textContent = pickedFiles.length
+    ? `${pickedFiles.length} file(s) ready` + (ignored ? `, ${ignored} unsupported file(s) ignored` : "") + ":\n" +
+      pickedFiles.slice(0, 12).map(f => "• " + (f.webkitRelativePath || f.name)).join("\n") + (pickedFiles.length > 12 ? "\n…" : "")
+    : "No supported files found. Supported: PDF, Word (.docx), Markdown, text.";
+}
+$("folderInput").addEventListener("change", e => setPicked(e.target.files, true));
+$("filesInput").addEventListener("change", e => setPicked(e.target.files, false));
+
+$("uploadBtn").addEventListener("click", async () => {
+  const name = $("newMachine").value.trim() || $("machine").value;
+  if (!pickedFiles.length) { status("Choose a folder or files first.", true); return; }
+  if (!name) { status("Give the machine a name.", true); return; }
+  const form = new FormData();
+  pickedFiles.forEach(f => form.append("files", f, f.webkitRelativePath || f.name));
+  form.append("replace", $("replaceDocs").checked ? "true" : "false");
+  $("uploadBtn").disabled = true;
+  status(`Uploading ${pickedFiles.length} file(s) and building the search index…`);
+  try {
+    const res = await fetch(`/machines/${encodeURIComponent(name)}/documents`, { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) { status(data.detail || "Upload failed", true); return; }
+    status(`Learned ${data.saved.length} file(s) for "${data.machine}" (${data.chunks} chunks, ${data.seconds}s).` +
+           (data.skipped.length ? ` Skipped: ${data.skipped.join(", ")}` : ""));
+    await loadMachines(data.machine);
+    showDocs(data.machine);
+    pickedFiles = []; $("picked").textContent = "Done. Ask your question above.";
+  } catch (e) {
+    status("Upload failed: " + e.message, true);
+  } finally {
+    $("uploadBtn").disabled = false;
+  }
+});
+
+async function showDocs(machine) {
+  const res = await fetch(`/machines/${encodeURIComponent(machine)}/documents`);
+  if (!res.ok) { $("docList").textContent = ""; return; }
+  const { documents } = await res.json();
+  $("docList").textContent = `Documents for ${machine}:\n` + documents.map(d => "• " + d).join("\n");
+}
+$("machine").addEventListener("change", e => showDocs(e.target.value));
+
+loadMachines().then(() => $("machine").value && showDocs($("machine").value));
 </script>
 </body>
 </html>

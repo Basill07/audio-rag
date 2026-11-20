@@ -18,6 +18,7 @@ Everything runs **locally**: speech recognition, search and the language model. 
 - **Hybrid search:** vector search plus an exact-match boost for codes like `E47`, so error codes are never confused
 - **Fixes misheard codes** ("air Re47" → "error E47") before searching
 - **Shows its sources** (file and section) for every answer
+- **Add a machine from the browser:** choose a folder or files, and it learns them right away
 - **One folder per machine** (`data/station3/`, `data/truck_x/`, …), each with its own vector collection
 - **Machine-specific speech hints** so Whisper hears "E47" correctly
 - **REST API** (FastAPI) for integration into an HMI, an app or a vehicle system
@@ -65,6 +66,10 @@ uvicorn audio_rag.api:app
 ```
 
 ## Add your own machine
+
+**In the web demo:** open *Add documents for a machine*, type a name, click **Choose folder** (or **Choose files**) and then **Upload and learn**. The assistant is ready for questions a few seconds later.
+
+**From the command line:**
 
 1. Create a folder, for example `data/forklift/`, and put its documents in it (`.pdf`, `.md`, `.txt`, `.docx`).
 2. Optional: add `data/forklift/whisper_hints.txt` with error codes and part names, so speech recognition gets them right.
